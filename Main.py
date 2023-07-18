@@ -6,45 +6,42 @@ def Extracttext():
     window['Step'].update('Launching Illustrator')
     window['Bar'].update(10)
     IllustratorApp = com.DispatchEx('Illustrator.Application')
+
     window['Step'].update('Opening ai file')
     window['Bar'].update(20)
     AiDoc = IllustratorApp.Open(window['EInput'].get())
 
-    strings = {}
-    window['Step'].update('Renaming Text Frames and gathering text')
+    strings = dict()
+    window['Step'].update('Extracting text')
     window['Bar'].update(40)
     for index, frame in enumerate(AiDoc.TextFrames):
-        frame.Name = str(index)
         strings[index] = frame.Contents
 
     window['Step'].update('Launching Word')
-    window['Bar'].update(60)
+    window['Bar'].update(50)
     WordApp = com.DispatchEx('Word.Application')
 
     WordDoc = WordApp.Documents.Add()
     WordDoc = WordApp.ActiveDocument
     rng = WordDoc.Range()
-    table = WordDoc.Tables.Add(rng, len(strings)+1, 3)
-    window['Step'].update('Populating Table with strings')
+    table = WordDoc.Tables.Add(rng, len(strings)+1, 2)
+
+    window['Step'].update('Populating Word file')
     window['Bar'].update(80)
-    table.Cell(1, 1).Range.Text = 'TextFrame'
-    table.Cell(1, 2).Range.Text = 'Source'
-    table.Cell(1, 3).Range.Text = 'Target'
+    table.Cell(1, 1).Range.Text = 'Source'
+    table.Cell(1, 2).Range.Text = 'Target'
 
     for key, value in strings.items():
-        table.Cell(key + 2, 1).Range.Text = str(key)
+        table.Cell(key + 2, 1).Range.Text = value
         table.Cell(key + 2, 2).Range.Text = value
-        table.Cell(key + 2, 3).Range.Text = value
 
     table.Columns(1).Select()
-    WordDoc.Application.Selection.Font.Hidden = True
-    table.Columns(2).Select()
     WordDoc.Application.Selection.Font.Hidden = True
     table.Rows(1).Select()
     WordDoc.Application.Selection.Font.Hidden = True
     window['Step'].update('Saving and quitting')
     window['Bar'].update(90)
-    WordDoc.SaveAs(window['EInput'].get()[:-3] + '.docx')
+    WordDoc.SaveAs(window['EInput'].get() + '.docx')
     WordApp.Quit()
     AiDoc.Save()
     IllustratorApp.Quit()
@@ -52,7 +49,7 @@ def Extracttext():
 
 def ImportText():
     window['Step'].update('Launching Illustrator')
-    window['Bar'].update(0)
+    window['Bar'].update(10)
     IllustratorApp = com.DispatchEx('Illustrator.Application')
     window['Step'].update('Opening ai file')
     window['Bar'].update(20)
@@ -74,12 +71,10 @@ def ImportText():
     window['Bar'].update(60)
     for i in AiDoc.TextFrames:
         i.Contents = table.Cell(j, 3).Range.Text
-        i.Name = table.Cell(j, 3).Range.Text
         j += 1
     window['Step'].update('Saving and quitting')
     window['Bar'].update(90)
     AiDoc.SaveAs(window['EInput'].get()[:-3] + '_Merged.ai')
-
     WordApp.Quit()
     IllustratorApp.Quit(2)
 
