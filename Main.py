@@ -1,82 +1,77 @@
-import win32com.client as com
+from win32com.client import DispatchEx, GetActiveObject
 import PySimpleGUI as gui
+from regex import match, findall
 
 
-def Extracttext():
-    window['Step'].update('Launching Illustrator')
-    window['Bar'].update(10)
-    IllustratorApp = com.DispatchEx('Illustrator.Application')
+def split(FullPath):
+    PathOnly = ''
+    for find in findall(r'[^\/]+?\/', FullPath):
+        PathOnly += find
+    FileOnly = match(r'(?r)[^\/]+', FullPath).group()
+    return (FullPath, PathOnly.replace('/', '\\'), FileOnly)
 
-    window['Step'].update('Opening ai file')
-    window['Bar'].update(20)
-    AiDoc = IllustratorApp.Open(window['EInput'].get())
+
+def StartAI():
+    AiApp = DispatchEx('Illustrator.Application')
+    return AiApp
+
+
+def Extracttext(AiApp, PathOnly, FileOnly):
+    yield 'Opening ai file', 10
+    AiDoc = AiApp.Open(PathOnly + FileOnly)
 
     strings = dict()
-    window['Step'].update('Extracting text')
-    window['Bar'].update(40)
     for index, frame in enumerate(AiDoc.TextFrames):
+        yield f'Extracting text, {index}/{len(AiDoc.TextFrames)}',\
+            10 + (65*(index/len(AiDoc.TextFrames)))
         strings[index] = frame.Contents
 
-    window['Step'].update('Launching Word')
-    window['Bar'].update(50)
-    WordApp = com.DispatchEx('Word.Application')
+    yield 'Opening Word', 75
+    WordApp = DispatchEx('Word.Application')
 
     WordDoc = WordApp.Documents.Add()
     WordDoc = WordApp.ActiveDocument
     rng = WordDoc.Range()
     table = WordDoc.Tables.Add(rng, len(strings)+1, 2)
-
-    window['Step'].update('Populating Word file')
-    window['Bar'].update(80)
     table.Cell(1, 1).Range.Text = 'Source'
     table.Cell(1, 2).Range.Text = 'Target'
 
+    j = 0
     for key, value in strings.items():
+        yield f'Populating Word file, {j}/{len(strings)}',\
+            75 + (25*(j/len(strings)))
         table.Cell(key + 2, 1).Range.Text = value
         table.Cell(key + 2, 2).Range.Text = value
+        j += 1
 
     table.Columns(1).Select()
     WordDoc.Application.Selection.Font.Hidden = True
     table.Rows(1).Select()
     WordDoc.Application.Selection.Font.Hidden = True
-    window['Step'].update('Saving and quitting')
-    window['Bar'].update(90)
-    WordDoc.SaveAs(window['EInput'].get() + '.docx')
+    WordDoc.SaveAs(PathOnly + FileOnly + '.docx')
     WordApp.Quit()
-    AiDoc.Save()
-    IllustratorApp.Quit()
+    AiDoc.Close()
 
 
-def ImportText():
-    window['Step'].update('Launching Illustrator')
-    window['Bar'].update(10)
-    IllustratorApp = com.DispatchEx('Illustrator.Application')
-    window['Step'].update('Opening ai file')
-    window['Bar'].update(20)
-    AiDoc = IllustratorApp.Open(window['EInput'].get())
-
-    window['Step'].update('Launching Word')
-    window['Bar'].update(30)
-    WordApp = com.DispatchEx('Word.Application')
-    window['Step'].update('Opening Word file')
-    window['Bar'].update(40)
-    WordDoc = WordApp.Documents.Open(window['IInput'].get())
+def ImportText(AiApp, AiPathOnly, AiFileOnly, WdPathOnly, WdFileOnly):
+    yield 'Opening ai file', 5
+    AiDoc = AiApp.Open(AiPathOnly + AiFileOnly)
+    yield 'Opening Word file', 10
+    WordApp = DispatchEx('Word.Application')
+    WordDoc = WordApp.Documents.Open(WdPathOnly + WdFileOnly)
     WordDoc = WordApp.ActiveDocument
-    WordDoc.Select()
-    WordDoc.Application.Selection.Font.Hidden = False
-
     table = WordDoc.Tables(1)
+    table.Columns(1).Select()
+    WordApp.Selection.Range.Font.Hidden = False
     j = 2
-    window['Step'].update('Populating ai file')
-    window['Bar'].update(60)
-    for i in AiDoc.TextFrames:
-        i.Contents = table.Cell(j, 3).Range.Text
+    for index, i in enumerate(AiDoc.TextFrames):
+        yield f'merging {index + 1}/{len(AiDoc.TextFrames)}',\
+            10 + (85*(index/len(AiDoc.TextFrames)))
+        i.Contents = table.Cell(j, 2).Range.Text
         j += 1
-    window['Step'].update('Saving and quitting')
-    window['Bar'].update(90)
-    AiDoc.SaveAs(window['EInput'].get()[:-3] + '_Merged.ai')
+    AiDoc.SaveAs(AiPathOnly + AiFileOnly[:-3] + '_Merged.ai')
     WordApp.Quit()
-    IllustratorApp.Quit(2)
+    AiApp.Quit()
 
 
 layout = [
@@ -84,10 +79,10 @@ layout = [
      gui.Button(button_text='Import Text', key='Import')],
     [gui.Text('Ai file', size=15, visible=False, key='EText'),
      gui.Input(default_text='', visible=False, key='EInput'),
-     gui.FileBrowse(visible=False, key='EBrowse', target='EInput')],
+     gui.FilesBrowse(visible=False, key='EBrowse', target='EInput')],
     [gui.Text('Word file', size=15, visible=False, key='IText'),
      gui.Input(default_text='', visible=False, key='IInput'),
-     gui.FileBrowse(visible=False, key='IBrowse', target='IInput')],
+     gui.FilesBrowse(visible=False, key='IBrowse', target='IInput')],
     [gui.Submit(visible=False, key='Run')],
     [gui.Text('', visible=False, key='Step')],
     [gui.ProgressBar(max_value=100, key='Bar', visible=False)]
@@ -126,12 +121,49 @@ while True:
             window['Step'].update(visible=True)
             window['Bar'].update(visible=True)
             if Extract:
-                Extracttext()
+                FileList = values['EInput'].split(';')
+                window['Bar'].update(0, len(FileList))
+                window.Refresh()
+                try:
+                    AiApp = GetActiveObject('Illustrator.Application')
+                except Exception:
+                    AiApp = StartAI()
+                for index, file in enumerate(FileList):
+                    FullPath, PathOnly, FileOnly = split(file)
+                    for step, prog in Extracttext(AiApp,
+                                                  PathOnly, FileOnly):
+                        window['Step'].update(FileOnly + '\n' + step)
+                        window['Bar'].update(index + (prog/100))
                 window['Step'].update('Done!')
-                window['Bar'].update(100)
+                window['Bar'].update(len(FileList))
+                # AiApp.Quit()
             else:
-                ImportText()
+                AiFileList = values['EInput'].split(';')
+                WordFileList = values['IInput'].split(';')
+                window['Bar'].update(0, len(AiFileList))
+                window.Refresh()
+                MatchDict = dict()
+                AiFileList = values['EInput'].split(';')
+                WdFileList = values['IInput'].split(';')
+                for Aifile in AiFileList:
+                    AiFullPath, AiPathOnly, AiFileOnly = split(Aifile)
+                    for Wdfile in WdFileList:
+                        WdFullPath, WdPathOnly, WdFileOnly = split(Wdfile)
+                        if AiFileOnly == WdFileOnly[:-5]:
+                            MatchDict[AiFullPath] = WdFullPath
+                try:
+                    AiApp = GetActiveObject('Illustrator.Application')
+                except Exception:
+                    AiApp = StartAI()
+                for Aifile, WdFile in MatchDict.items():
+                    index = 0
+                    AiFullPath, AiPathOnly, AiFileOnly = split(Aifile)
+                    WdFullPath, WdPathOnly, WdFileOnly = split(Wdfile)
+                    for step, prog in ImportText(AiApp, AiPathOnly, AiFileOnly,
+                                                 WdPathOnly, WdFileOnly):
+                        window['Step'].update(AiFileOnly + '\n' + step)
+                        window['Bar'].update(index + (prog/100))
+                        index += 1
                 window['Step'].update('Done!')
-                window['Bar'].update(100)
-
+                window['Bar'].update(len(MatchDict))
 window.close()
