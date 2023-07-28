@@ -1,6 +1,7 @@
 from pathlib import Path
-from win32com.client import GetActiveObject, DispatchEx
+from win32com.client import DispatchEx
 import PySimpleGUI as gui
+from regex import search
 
 
 def SetFields(Option: str):
@@ -24,22 +25,47 @@ def ExtractText(AiApp, WordApp, File: Path):
     Strings = list()
     AiDoc = AiApp.Open(File.as_posix())
     for index, textframe in enumerate(AiDoc.TextFrames):
-        yield f'Gatherings text strings, {index} of {len(AiDoc.TextFrames)}'
+        yield f'Gatherings text strings, {index + 1} of' +\
+             f' {len(AiDoc.TextFrames)}', 0.5
         Strings.append(textframe.Contents)
     AiDoc.Close()
-    WordDoc = WordApp.Documents.Add(Visible=False)
-    Table = WordDoc.Tables.Add()
-    for string in Strings
+    WordFile = WordApp.Documents.Add()
+    WordFile = WordApp.ActiveDocument
+    rng = WordFile.Range()
+    table = WordFile.Tables.Add(rng, len(Strings)+1, 2)
+    table.Cell(1, 1).Range.Text = 'Source'
+    table.Cell(1, 1).Range.font.Hidden = True
+    table.Cell(1, 2).Range.Text = 'Target'
+    table.Cell(1, 2).Range.font.Hidden = True
+    for index, string in enumerate(Strings):
+        yield f'Populating Word Export, {index + 1} of {len(Strings)}', 1
+        table.Cell(index + 2, 1).Range.Text = string
+        table.Cell(index + 2, 1).Range.Font.Hidden = True
+        table.Cell(index + 2, 2).Range.Text = string
+    WordFile.SaveAs2(f'{File.parent.as_posix()}/Strings_{File.name}.docx',
+                     FileFormat=12)
+    WordFile.Close()
 
 
-def FillWord(WordApp, Strings: list):
+def ImportText(AiApp, AiFile: Path, WordApp, WordFile: Path):
+
+    WordDoc = WordApp.Documents.Open(WordFile.__str__(), Visible=False)
+    WordDoc = WordApp.ActiveDocument
+    AiDoc = AiApp.Open(AiFile.as_posix())
+    Table = WordDoc.Tables(1)
+    for i in range(2, Table.Rows.Count + 1):
+        yield f'Populating .ai File, segment {i} of {Table.Rows.Count}'
+        AiDoc.TextFrames(i - 1).Contents = Table.Cell(i, 2).Range.Text[:-1]
+    WordDoc.Close()
+    AiDoc.SaveAs(f'{AiFile.parent.as_posix()}/Merged_{AiFile.name}')
+    AiDoc.Close()
 
 
 layout = [
     [gui.Button(button_text='Extract', key='-Extract-'),
      gui.Button(button_text='Import', key='-Import-')],
     [gui.InputText(default_text='Path to .ai files.', key='-AiPath-',
-                   visible=False),
+                   visible=False, ),
      gui.FilesBrowse(button_text='Browse', target='-AiPath-', key='-AiBrowse-',
                      visible=False,
                      file_types=(('Illustrator files', '*.ai'),))],
@@ -47,10 +73,10 @@ layout = [
                    visible=False),
      gui.FilesBrowse(button_text='Browse', target='-DocPath-',
                      visible=False, key='-DocBrowse-',
-                     file_types=(('Word files', '*.doc'),),)],
+                     file_types=(('Word files', '*.docx'),),)],
     [gui.Submit(button_text='Start', key='-Start-', visible=False)],
-    [gui.ProgressBar(max_value=100, orientation='horizontal',
-                     key='-PBar-')],
+    [gui.ProgressBar(max_value=1, orientation='horizontal',
+                     key='-PBar-', size=(50, 5))],
     [gui.Text(text='', key='-PFileName-')],
     [gui.Text(text='', key='-PStep-')]
 ]
@@ -68,28 +94,43 @@ while True:
             SetFields('Extract')
             window.refresh()
             Extract = True
-        case 'Import':
+        case '-Import-':
             SetFields('Import')
             Extract = False
         case '-Start-':
-            FileList = values['-AiPath-'].split(';')
-            try:
-                AiApp = GetActiveObject('Illustrator.Application')
-            except Exception:
-                AiApp = DispatchEx('Illustrator.Application')
-                AiApp.Visible = False
-                NewAi = True
+            AiFileList = values['-AiPath-'].split(';')
+            WordFileList = values['-DocPath-'].split(';')
+            window['-PStep-'].update(value='Opening Illustrator and Word')
+            AiApp = DispatchEx('Illustrator.Application')
             WordApp = DispatchEx('Word.Application')
-            WordApp.Visible = False
             AiApp.UserInteractionLevel = -1
-            for file in FileList:
-                file = Path(file)
-                window['-PFileName-'].update(value=file.name)
-                if Extract:
-                    for step in ExtractText(AiApp, WordApp, file):
+            if Extract:
+                for Aifileindex, file in enumerate(AiFileList):
+                    file = Path(file)
+                    window['-PFileName-'].update(value=file.name)
+                    for step, prog in ExtractText(AiApp, WordApp, file):
                         window['-PStep-'].update(value=step)
-            AiApp.UserInteractionLevel = 2
+                        window['-PBar-'].update(
+                            current_count=(Aifileindex + prog)/len(AiFileList))
+            else:
+                if len(AiFileList) != len(WordFileList):
+                    gui.popup_error('''Files do not match!
+Please note that there isn\'t the same amount of Word files and .ai files.''',
+                                    auto_close_duration=4)
+                for Aifileindex, AiFile in enumerate(AiFileList):
+                    AiFile = Path(AiFile)
+                    for WordIndex, WordFile in enumerate(WordFileList):
+                        if search(AiFile.name, WordFile):
+                            WordFile = Path(WordFile)
+                            for step in ImportText(AiApp, AiFile,
+                                                   WordApp, WordFile):
+                                window['-PStep-'].update(value=step)
+                                window['-PBar-'].update(
+                                    current_count=(
+                                        WordIndex + 1)/len(WordFileList))
+            window['-PFileName-'].update(value='')
+            window['-PStep-'].update(value='Done!')
+            window['-PBar-'].update(current_count=100)
             WordApp.Quit()
-            if NewAi:
-                AiApp.Quit()
+            AiApp.Quit()
 window.close()
