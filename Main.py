@@ -9,11 +9,26 @@ def SetFields(Option: str):
     window['-Start-'].update(visible=True)
     match Option:
         case 'Extract':
+            window['-Info-'].update(value='''To Extract text from .ai files:
+- Choose the files you want to process using the \'Browse\' button then click on \'Start\'.
+- The program will automatically launch an instance of Adobe Illustrator and Word then proceed to extract segments from all the selected .ai files.
+- Extracted segments are saved in a Word file called Strings_<.ai file name>.docx.
+''')  # noqa: E501
+            window['-PBar-'].update(visible=True)
             window['-AiPath-'].update(visible=True)
             window['-AiBrowse-'].update(visible=True)
             window['-DocPath-'].update(visible=False)
             window['-DocBrowse-'].update(visible=False)
         case 'Import':
+            window['-Info-'].update(value='''To create translated .ai files:
+- Choose the .ai files you want to translate using the \'Browse\' button.
+- Choose the translated .docx files containing the translations using the \'Browse\' button.
+- The program will automatically launch an instance of Adobe Illustrator and Word then proceed to match a word file to its corresponding .ai file.
+- Merged .ai file are saved as called Merged_<.ai file name>.
+IMPORTANT: the translated .docx file NEEDS to be named <.ai file name>.docx.
+NO LP CODE, if the names are different, even by 1 character, the import will not work!
+''')  # noqa: E501
+            window['-PBar-'].update(visible=True)
             window['-AiPath-'].update(visible=True)
             window['-AiBrowse-'].update(visible=True)
             window['-DocPath-'].update(visible=True)
@@ -22,26 +37,23 @@ def SetFields(Option: str):
 
 def ExtractText(AiApp, WordApp, File: Path):
 
-    Strings = list()
+    yield 'Opening .ai file'
     AiDoc = AiApp.Open(File.as_posix())
-    for index, textframe in enumerate(AiDoc.TextFrames):
-        yield f'Gatherings text strings, {index + 1} of' +\
-             f' {len(AiDoc.TextFrames)}', 0.5
-        Strings.append(textframe.Contents)
-    AiDoc.Close()
     WordFile = WordApp.Documents.Add()
     WordFile = WordApp.ActiveDocument
     rng = WordFile.Range()
-    table = WordFile.Tables.Add(rng, len(Strings)+1, 2)
+    table = WordFile.Tables.Add(rng, len(AiDoc.TextFrames)+1, 2)
     table.Cell(1, 1).Range.Text = 'Source'
     table.Cell(1, 1).Range.font.Hidden = True
     table.Cell(1, 2).Range.Text = 'Target'
     table.Cell(1, 2).Range.font.Hidden = True
-    for index, string in enumerate(Strings):
-        yield f'Populating Word Export, {index + 1} of {len(Strings)}', 1
-        table.Cell(index + 2, 1).Range.Text = string
+    for index, textframe in enumerate(AiDoc.TextFrames):
+        yield f'Extracting text, Segment {index + 1} of' +\
+             f' {len(AiDoc.TextFrames)}'
+        table.Cell(index + 2, 1).Range.Text = textframe.Contents
         table.Cell(index + 2, 1).Range.Font.Hidden = True
-        table.Cell(index + 2, 2).Range.Text = string
+        table.Cell(index + 2, 2).Range.Text = textframe.Contents
+    AiDoc.Close()
     WordFile.SaveAs2(f'{File.parent.as_posix()}/Strings_{File.name}.docx',
                      FileFormat=12)
     WordFile.Close()
@@ -64,6 +76,8 @@ def ImportText(AiApp, AiFile: Path, WordApp, WordFile: Path):
 layout = [
     [gui.Button(button_text='Extract', key='-Extract-'),
      gui.Button(button_text='Import', key='-Import-')],
+    [gui.Text(text='Select \'Extract\' or \'Import\' to start.',
+              key='-Info-', size=(65, 8))],
     [gui.InputText(default_text='Path to .ai files.', key='-AiPath-',
                    visible=False, ),
      gui.FilesBrowse(button_text='Browse', target='-AiPath-', key='-AiBrowse-',
@@ -76,7 +90,7 @@ layout = [
                      file_types=(('Word files', '*.docx'),),)],
     [gui.Submit(button_text='Start', key='-Start-', visible=False)],
     [gui.ProgressBar(max_value=1, orientation='horizontal',
-                     key='-PBar-', size=(50, 5))],
+                     key='-PBar-', size=(50, 5), visible=False)],
     [gui.Text(text='', key='-PFileName-')],
     [gui.Text(text='', key='-PStep-')]
 ]
@@ -108,10 +122,10 @@ while True:
                 for Aifileindex, file in enumerate(AiFileList):
                     file = Path(file)
                     window['-PFileName-'].update(value=file.name)
-                    for step, prog in ExtractText(AiApp, WordApp, file):
+                    for step in ExtractText(AiApp, WordApp, file):
                         window['-PStep-'].update(value=step)
                         window['-PBar-'].update(
-                            current_count=(Aifileindex + prog)/len(AiFileList))
+                            current_count=(Aifileindex)/len(AiFileList))
             else:
                 if len(AiFileList) != len(WordFileList):
                     gui.popup_error('''Files do not match!
