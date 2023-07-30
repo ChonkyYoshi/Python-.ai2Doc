@@ -25,7 +25,7 @@ def SetFields(Option: str):
 - Choose the translated .docx files containing the translations using the \'Browse\' button.
 - The program will automatically launch an instance of Adobe Illustrator and Word then proceed to match a word file to its corresponding .ai file.
 - Merged .ai file are saved as called Merged_<.ai file name>.
-IMPORTANT: the translated .docx file NEEDS to be named <.ai file name>.docx.
+IMPORTANT: the translated .docx file NEEDS to be named <.ai file name>_lp-LP.docx.
 NO LP CODE, if the names are different, even by 1 character, the import will not work!
 ''')  # noqa: E501
             window['-PBar-'].update(visible=True)
@@ -128,13 +128,14 @@ while True:
                             current_count=(Aifileindex)/len(AiFileList))
             else:
                 if len(AiFileList) != len(WordFileList):
-                    gui.popup_error('''Files do not match!
+                    gui.popup_error('''Number of files do not match!
 Please note that there isn\'t the same amount of Word files and .ai files.''',
                                     auto_close_duration=4)
                 for Aifileindex, AiFile in enumerate(AiFileList):
                     AiFile = Path(AiFile)
                     for WordIndex, WordFile in enumerate(WordFileList):
-                        if search(AiFile.name, WordFile):
+                        if search(r'Strings_' + AiFile.name +
+                                  r'-\w{2}-\w{2}\.docx', WordFile):
                             WordFile = Path(WordFile)
                             for step in ImportText(AiApp, AiFile,
                                                    WordApp, WordFile):
