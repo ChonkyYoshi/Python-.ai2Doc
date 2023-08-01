@@ -1,6 +1,6 @@
 from cx_Freeze import setup, Executable
 
-includefiles = ['letters.ini']
+includefiles = []
 includes = []
 excludes = []
 
