@@ -1,12 +1,12 @@
 from cx_Freeze import setup, Executable
 
-includefiles = []
+includefiles = ['letters.ini']
 includes = []
 excludes = []
 
 setup(
     name='Illustrator2Doc',
-    version='0.1',
+    version='0.2',
     description='Python GUI App to prep/clean up Illustrator files',
     author='Enzo Agosta',
     author_email='agosta.enzowork@gmail.com',
