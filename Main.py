@@ -97,10 +97,16 @@ def Pseudo(AiApp, AiFile: Path):
 
 
 def replacetext(source: str):
-    for i in source:
-        if i not in list(' \t\n\r\f\v'):
-            a = choice(list('\u4E10\u4e11\u4e12\u4e14\u4e15\u4e16\u4e17\u4e18\u4e19'))  # noqa: E501
-            source = source.replace(i, a, 1)
+    source = source.replace('a', choice(list('\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6')))  # noqa: E501
+    source = source.replace('e', choice(list('\u00e8\u00e9\u00ea\u00eb')))
+    source = source.replace('i', choice(list('\u00ec\u00ed\u00ee\u00ef')))
+    source = source.replace('o', choice(list('\u00f2\u00f3\u00f4\u00f5\u00f6')))  # noqa: E501
+    source = source.replace('u', choice(list('\u00f9\u00fa\u00fb\u00fc\u00fd')))  # noqa: E501
+    source = source.replace('A', choice(list('\u00c0\u00c1\u00c2\u00c3\u00c4\u00c5\u00c6')))  # noqa: E501
+    source = source.replace('E', choice(list('\u00c8\u00c9\u00ca\u00cb')))
+    source = source.replace('I', choice(list('\u00cc\u00cd\u00ce\u00cf')))
+    source = source.replace('O', choice(list('\u00d2\u00d3\u00d4\u00d5\u00d6')))  # noqa: E501
+    source = source.replace('U', choice(list('\u00d9\u00da\u00db\u00dc')))
     return source
 
 
@@ -167,11 +173,14 @@ while True:
                     if len(AiFileList) != len(WordFileList):
                         gui.popup_error('''Number of files do not match!
     Please note that there isn\'t the same amount of Word files and .ai files.''', auto_close_duration=4)  # noqa: E501
+                    window['-PStep-'].update(
+                        value='Opening Illustrator and Word')
                     AiApp = DispatchEx('Illustrator.Application')
                     WordApp = DispatchEx('Word.Application')
                     AiApp.UserInteractionLevel = -1
                     for Aifileindex, AiFile in enumerate(AiFileList):
                         AiFile = Path(AiFile)
+                        window['-PFileName-'].update(value=Aifile.name)
                         Found = False
                         for WordIndex, WordFile in enumerate(WordFileList):
                             if search(r'Strings_' + AiFile.name +
