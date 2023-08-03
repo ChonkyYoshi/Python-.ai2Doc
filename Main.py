@@ -3,6 +3,13 @@ from win32com.client import DispatchEx
 import PySimpleGUI as gui
 from regex import search
 from random import choice
+from configparser import ConfigParser
+
+# General note, there are a lot type: ignore and noqa E501 to shut up the formatter warnings
+
+# Grab intructions from config.ini
+config = ConfigParser()
+config.read('config.ini')
 
 
 def SetFields(Option: str):
@@ -10,34 +17,24 @@ def SetFields(Option: str):
     window['-Start-'].update(visible=True)
     match Option:
         case 'Extract':
-            window['-Info-'].update(value='''To Extract text from .ai files:
-- Choose the files you want to process using the \'Browse\' button then click on \'Start\'.
-- The program will automatically launch an instance of Adobe Illustrator and Word then proceed to extract segments from all the selected .ai files.
-- Extracted segments are saved in a Word file called Strings_<.ai file name>.docx.
-''')  # noqa: E501
+            # Display correct instructions and only the Illustrator file field.
+            window['-Info-'].update(value=config['Instructions']['Extract'])  # noqa: E501
             window['-PBar-'].update(visible=True)
             window['-AiPath-'].update(visible=True)
             window['-AiBrowse-'].update(visible=True)
             window['-DocPath-'].update(visible=False)
             window['-DocBrowse-'].update(visible=False)
         case 'Import':
-            window['-Info-'].update(value='''To create translated .ai files:
-- Choose the .ai files you want to translate using the \'Browse\' button.
-- Choose the translated .docx files containing the translations using the \'Browse\' button then click on \'Start\'.
-- The program will automatically launch an instance of Adobe Illustrator and Word then proceed to match a word file to its corresponding .ai file to impor it.
-- Merged .ai file are saved as called Merged_<.ai file name> and exported to pdf.
-IMPORTANT: the translated .docx file NEEDS to be named <.ai file name>-xx-YY.docx. Else an error will occur and the file will be skipped.''')  # noqa: E501
+            # Display correct instructions and both the Illustrator and Word file field.
+            window['-Info-'].update(value=config['Instructions']['Import'])  # noqa: E501
             window['-PBar-'].update(visible=True)
             window['-AiPath-'].update(visible=True)
             window['-AiBrowse-'].update(visible=True)
             window['-DocPath-'].update(visible=True)
             window['-DocBrowse-'].update(visible=True)
         case 'Pseudo':
-            window['-Info-'].update(value='''To pseudotranslate .ai files:
-- Choose the .ai files you want to translate using the \'Browse\' button then click on \'Start\'.
-- The program will automatically launch an instance of Adobe Illustrator then proceed to pseudotranslate all the text it can find in the file with random Chinese characters (including consonants and numbers).
-- Pseudotranslated .ai file are saved as called Pseudo_<.ai file name> and exported to pdf.
-IMPORTANT: This step DOES NOT extract and save a Word file.''')  # noqa: E501
+             # Display correct instructions and only the Illustrator file field.
+            window['-Info-'].update(value=config['Instructions']['Pseudo'])  # noqa: E501
             window['-PBar-'].update(visible=True)
             window['-AiPath-'].update(visible=True)
             window['-AiBrowse-'].update(visible=True)
@@ -45,9 +42,11 @@ IMPORTANT: This step DOES NOT extract and save a Word file.''')  # noqa: E501
             window['-DocBrowse-'].update(visible=False)
 
 
-def ExtractText(AiApp, WordApp, AiFile: Path, Hidden: bool, Locked: bool):
+def ExtractText(AiApp, WordApp, AiFile: Path,
+                Hidden: bool, Locked: bool, PDF: bool):
 
     yield 'Opening .ai file'
+    # Create new blank word file in the background and add table the with Source, Target at top and as many rows under that as there are TextFrames
     AiDoc = AiApp.Open(AiFile.as_posix())
     WordFile = WordApp.Documents.Add()
     WordFile = WordApp.ActiveDocument
@@ -60,6 +59,7 @@ def ExtractText(AiApp, WordApp, AiFile: Path, Hidden: bool, Locked: bool):
     max = AiDoc.TextFrames.Count
     count = 0
     for index, frame in enumerate(AiDoc.TextFrames):
+        # For each TextFrame, if hidden or locked and option was ticked, go to next Textframe, leaving that row blank, else grab text and put it in the Word table. Row corresponds to index of the TextFrame. Yield current progress with every iterations for gui progress bar
         yield f'Extracting text, Segment {index + 1} of {max}'
         if frame.Hidden and Hidden:
             continue
@@ -69,22 +69,27 @@ def ExtractText(AiApp, WordApp, AiFile: Path, Hidden: bool, Locked: bool):
         table.Cell(index + 2, 1).Range.Text = frame.Contents
         table.Cell(index + 2, 1).Range.Font.Hidden = True
         table.Cell(index + 2, 2).Range.Text = frame.Contents
+    if PDF:
+        AiDoc.ExportAsFormat(4, f'{AiFile.parent.as_posix()}/Merged_{AiFile.name}.pdf')  # noqa: E501
     AiDoc.Close()
     finalname = AiFile.name
+    # Prepare final file name following option chosen
     if Hidden:
         finalname += '_NO_HIDDEN'
     if Locked:
         finalname += '_NO_LOCKED'
-    for row in table.Rows:
-        if row.Cells(1).Range.Text[:-2] == '':
-            row.Delete()
+    # Loop over the table, and remove any blank row due to hidden/locked Textframes being skipped, only trigger if one of the two is True. Yield current progress with every iterations for gui progress bar
+    if Hidden or Locked:
+        for row in table.Rows:
+            if row.Cells(1).Range.Text[:-2] == '':
+                row.Delete()
     WordFile.SaveAs2(f'{AiFile.parent.as_posix()}/Strings_{finalname}.docx',
                      FileFormat=12)
     WordFile.Close()
 
 
 def ImportText(AiApp, AiFile: Path, WordApp, WordFile: Path,
-               Hidden:bool = False, Locked: bool = False):
+               Hidden:bool, Locked: bool, PDF: bool):
 
     WordDoc = WordApp.Documents.Open(WordFile.as_posix(), Visible=False)
     WordDoc = WordApp.ActiveDocument
@@ -93,32 +98,44 @@ def ImportText(AiApp, AiFile: Path, WordApp, WordFile: Path,
     max = AiDoc.TextFrames.Count
     i = 2
     for index, frame in enumerate(AiDoc.TextFrames):
+        # Start looping over all TextFrame, keeping track of the current row (i) and only incrementing if text is imported. Yield current progress with every iterations for gui progress bar
         yield f'Populating .ai File, segment {index} of {max}'
+        # If hidden or locked (based on filename), move to next TextFrame
         if Hidden and frame.hidden:
             continue
         if Locked and frame.locked:
             continue
+        # Not copying the last 2 characters as they're always the combo Ascii 13 and Ascii 10, which is what Word uses to mark the end of a cell.
         frame.Contents = Table.Cell(i, 2).Range.Text[:-2]
         i += 1
     WordDoc.Close()
     AiDoc.SaveAs(f'{AiFile.parent.as_posix()}/Merged_{AiFile.name}')
-    AiDoc.ExportAsFormat(4, f'{AiFile.parent.as_posix()}/Merged_{AiFile.name}.pdf')  # noqa: E501
+    if PDF:
+        AiDoc.ExportAsFormat(4, f'{AiFile.parent.as_posix()}/Merged_{AiFile.name}.pdf')  # noqa: E501
     AiDoc.Close()
 
 
-def Pseudo(AiApp, AiFile: Path):
+def Pseudo(AiApp, AiFile: Path, Hidden:bool, Locked: bool, PDF: bool):
     yield 'Opening .ai file'
     AiDoc = AiApp.Open(AiFile.as_posix())
-    for index, textframe in enumerate(AiDoc.TextFrames):
+    for index, frame in enumerate(AiDoc.TextFrames):
+        # Start looping over all TextFrames, pseudotranslating as needed following chosen options.
         yield f'PseudoTranslating text, Segment {index + 1} of' +\
              f' {len(AiDoc.TextFrames)}'
-        textframe.Contents = replacetext(textframe.Contents)
+        if Hidden and frame.hidden:
+            continue
+        if Locked and frame.locked:
+            continue
+        # If text should be pseudotranslated, call ReplaceText on the contents
+        frame.Contents = replacetext(frame.Contents)
     AiDoc.SaveAs(f'{AiFile.parent.as_posix()}/Pseudo_{AiFile.name}')
-    AiDoc.ExportAsFormat(4, f'{AiFile.parent.as_posix()}/Pseudo_{AiFile.name}.pdf')  # noqa: E501
+    if PDF:
+        AiDoc.ExportAsFormat(4, f'{AiFile.parent.as_posix()}/Pseudo_{AiFile.name}.pdf')  # noqa: E501
     AiDoc.Close()
 
 
 def replacetext(source: str):
+    # Replaces vowels with a random accented variant using unicode. Based on default AP pseudotranslator config, can be modified as needed. Everything is done on the string in memory, before sending it back to the main loop for speed purposes.
     source = source.replace('a', choice(list('\u00e0\u00e1\u00e2\u00e3\u00e4\u00e5\u00e6')))  # noqa: E501
     source = source.replace('e', choice(list('\u00e8\u00e9\u00ea\u00eb')))
     source = source.replace('i', choice(list('\u00ec\u00ed\u00ee\u00ef')))
@@ -134,6 +151,7 @@ def replacetext(source: str):
 
 def Collapsible(layout, key, title='', arrows=(gui.SYMBOL_DOWN, gui.SYMBOL_UP),
                 collapsed=False):
+    # Collapsible function to have a nice options dropdown, taken straight from PySimpleGui Cookbook.
     return gui.Column([[gui.T((arrows[1] if collapsed else arrows[0]),
                       enable_events=True, k=key+'-BUTTON-'), gui.T(title,
                       enable_events=True, key=key+'-TITLE-')],
@@ -141,22 +159,23 @@ def Collapsible(layout, key, title='', arrows=(gui.SYMBOL_DOWN, gui.SYMBOL_UP),
                        visible=not collapsed, metadata=arrows))]], pad=(0, 0))
 
 
+# Options layout, PDF is turned on by default
 Options = [
     [gui.Checkbox(text='Skip Hidden', auto_size_text=True,
      key='hidden', size=(22, 1), pad=(0, 0), metadata='option'),
      gui.Checkbox(text='Skip Locked', auto_size_text=True,
      key='locked', size=(22, 1), pad=(0, 0), metadata='option'),
-     gui.Checkbox(text='No PDF Export', auto_size_text=True,
-     key='noPDF', size=(22, 1), pad=(0, 0), metadata='option')]
+     gui.Checkbox(text='Export to PDF', auto_size_text=True,
+     key='PDF', size=(22, 1), pad=(0, 0), metadata='option', default=True)]
 ]
 
-
+# Main Layout, File Browser are file type restricted to either .ai or .docx. Also contains the Progress bar settings
 layout = [
     [gui.Button(button_text='Extract', key='-Extract-'),
      gui.Button(button_text='Import', key='-Import-'),
      gui.Button(button_text='Pseudo', key='-Pseudo-')],
     [gui.Text(text='Select \'Extract\' or \'Import\' to start.',
-              key='-Info-', size=(65, 8))],
+              key='-Info-', size=(65, 11))],
     [gui.InputText(default_text='Path to .ai files.', key='-AiPath-',
                    visible=False, ),
      gui.FilesBrowse(button_text='Browse', target='-AiPath-', key='-AiBrowse-',
@@ -176,19 +195,23 @@ layout = [
     [gui.Text(text='', key='-PStep-')]
 ]
 
+# Create the window and start the main loop
 window = gui.Window(title='Illustrator2Doc', layout=layout)
-Task = ''
 while True:
+    # On any event, get all the info
     event, values = window.read()  # type: ignore
     match event:
+        # On Exit, break out of the main loop to close the window
         case gui.WIN_CLOSED | 'Exit':
             break
+        # if clicking on Option Arrow dropdown, show the options
         case 'Options-BUTTON-':
             window['Options'].update(visible=not window['Options'].visible)
             window['Options'+'-BUTTON-'].\
                 update(window['Options'].metadata[0] if
                        window['Options'].visible else
                        window['Options'].metadata[1])
+        # If clicking on one of the buttons at the top, displays the correct info and set the 'Task' variable for later
         case '-Extract-':
             SetFields('Extract')
             Task = 'Extract'
@@ -199,22 +222,28 @@ while True:
             SetFields('Import')
             Task = 'Import'
         case '-Start-':
+            # Make a python list of all selected files and check the value of 'Task'
             AiFileList = values['-AiPath-'].split(';')
             WordFileList = values['-DocPath-'].split(';')
-            match Task:
+            match Task: #type: ignore
                 case 'Extract':
                     window['-PStep-'].update(
                         value='Opening Illustrator and Word')
+                    # Start an instance of Illustrator and Word, same instance is reused for every file and closed when processing is done
                     AiApp = DispatchEx('Illustrator.Application')
                     WordApp = DispatchEx('Word.Application')
+                    # Remove Illustrator user warnings for fonts and links missing and start looping over the files
                     AiApp.UserInteractionLevel = -1
                     for Aifileindex, Aifile in enumerate(AiFileList):
                         Aifile = Path(Aifile)
+                        # Display name of the file, and call Extract
                         window['-PFileName-'].update(value=Aifile.name)
                         for step in ExtractText(
                             AiApp, WordApp, Aifile,
                             window['hidden'].get(), # type: ignore
-                            window['locked'].get()): # type: ignore
+                            window['locked'].get(), # type: ignore
+                            window['PDF'].get()): # type: ignore
+                            # update progress bar based on the yield
                             window['-PStep-'].update(value=step)
                             window['-PBar-'].update(
                                 current_count=(
@@ -222,18 +251,24 @@ while True:
                     WordApp.Quit()
                     AiApp.Quit()
                 case 'Import':
+                    # Check number of files in both lists, if different, warn the user with a popup
                     if len(AiFileList) != len(WordFileList):
                         gui.popup_error('''Number of files do not match!
     Please note that there isn\'t the same amount of Word files and .ai files.''', auto_close_duration=4)  # noqa: E501
                     window['-PStep-'].update(
                         value='Opening Illustrator and Word')
+                    # Start an instance of Illustrator and Word, same instance is reused for every file and closed when processing is done. Also initalize empty list for potential files that can't be matched.
+                    NoMatch = list()
                     AiApp = DispatchEx('Illustrator.Application')
                     WordApp = DispatchEx('Word.Application')
+                    # Remove Illustrator user warnings for fonts and links missing and start looping over the files
                     AiApp.UserInteractionLevel = -1
+                    # Start looping over ai files
                     for Aifileindex, AiFile in enumerate(AiFileList):
                         AiFile = Path(AiFile)
                         window['-PFileName-'].update(value=AiFile.name)
                         Found = False
+                        # Loop through the names of all Word files, looking for a match with regex. If found, open both ai word file and start importing, if not, store the name of the ai file for report and go to the next file
                         for WordIndex, WordFile in enumerate(WordFileList):
                             if search(r'Strings_' + AiFile.name +
                                       r'(_NO_HIDDEN)*(_NO_LOCKED)*-\w{2}-\w{2}', WordFile):
@@ -245,26 +280,37 @@ while True:
                                 if search('_NO_LOCKED', WordFile):
                                     lock = True
                                 WordFile = Path(WordFile)
-                                for step in ImportText(AiApp, AiFile,
-                                                       WordApp, WordFile,
-                                                       Hid, lock):
+                                for step in ImportText(
+                                        AiApp, AiFile, WordApp, WordFile,
+                                        window['hidden'].get(), # type: ignore
+                                        window['locked'].get(), # type: ignore
+                                        window['PDF'].get()): # type: ignore
                                     window['-PStep-'].update(value=step)
                                     window['-PBar-'].update(
                                         current_count=(
                                             WordIndex + 1)/len(WordFileList))
                         if not Found:
-                            gui.popup_error(f'Couldn\'t find a match for {AiFile.name}. Please make sure that the translated Word file is called Strings_{AiFile.name}-xx-XX.docx')   # noqa: E501
+                            # if no match, put the ai file name in a list for later
+                            NoMatch.append(AiFile.name)
                     WordApp.Quit()
                     AiApp.Quit()
+                    if len(NoMatch) != 0:
+                        gui.popup(f'The following files could not be matched and were skipped:\n{NoMatch}')
                 case 'Pseudo':
                     window['-PStep-'].update(
                         value='Opening Illustrator ')
+                    # Start an instance of Illustrator only, same instance is reused for every file and closed when processing is done
                     AiApp = DispatchEx('Illustrator.Application')
+                    # Remove Illustrator user warnings for fonts and links missing and start looping over the files
                     AiApp.UserInteractionLevel = -1
                     for Aifileindex, Aifile in enumerate(AiFileList):
                         Aifile = Path(Aifile)
                         window['-PFileName-'].update(value=Aifile.name)
-                        for step in Pseudo(AiApp, Aifile):
+                        for step in Pseudo(
+                                AiApp, Aifile,
+                                window['hidden'].get(), # type: ignore
+                                window['locked'].get(), # type: ignore
+                                window['PDF'].get()): # type: ignore
                             window['-PStep-'].update(value=step)
                             window['-PBar-'].update(
                                 current_count=(
