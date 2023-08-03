@@ -45,7 +45,7 @@ IMPORTANT: This step DOES NOT extract and save a Word file.''')  # noqa: E501
             window['-DocBrowse-'].update(visible=False)
 
 
-def ExtractText(AiApp, WordApp, AiFile: Path):
+def ExtractText(AiApp, WordApp, AiFile: Path, Hidden: bool, Locked: bool):
 
     yield 'Opening .ai file'
     AiDoc = AiApp.Open(AiFile.as_posix())
@@ -57,27 +57,49 @@ def ExtractText(AiApp, WordApp, AiFile: Path):
     table.Cell(1, 1).Range.font.Hidden = True
     table.Cell(1, 2).Range.Text = 'Target'
     table.Cell(1, 2).Range.font.Hidden = True
-    for index, textframe in enumerate(AiDoc.TextFrames):
-        yield f'Extracting text, Segment {index + 1} of' +\
-             f' {len(AiDoc.TextFrames)}'
-        table.Cell(index + 2, 1).Range.Text = textframe.Contents
+    max = AiDoc.TextFrames.Count
+    count = 0
+    for index, frame in enumerate(AiDoc.TextFrames):
+        yield f'Extracting text, Segment {index + 1} of {max}'
+        if frame.Hidden and Hidden:
+            continue
+        if frame.locked and Locked:
+            continue
+        count += 1
+        table.Cell(index + 2, 1).Range.Text = frame.Contents
         table.Cell(index + 2, 1).Range.Font.Hidden = True
-        table.Cell(index + 2, 2).Range.Text = textframe.Contents
+        table.Cell(index + 2, 2).Range.Text = frame.Contents
     AiDoc.Close()
-    WordFile.SaveAs2(f'{AiFile.parent.as_posix()}/Strings_{AiFile.name}.docx',
+    finalname = AiFile.name
+    if Hidden:
+        finalname += '_NO_HIDDEN'
+    if Locked:
+        finalname += '_NO_LOCKED'
+    for row in table.Rows:
+        if row.Cells(1).Range.Text[:-2] == '':
+            row.Delete()
+    WordFile.SaveAs2(f'{AiFile.parent.as_posix()}/Strings_{finalname}.docx',
                      FileFormat=12)
     WordFile.Close()
 
 
-def ImportText(AiApp, AiFile: Path, WordApp, WordFile: Path):
+def ImportText(AiApp, AiFile: Path, WordApp, WordFile: Path,
+               Hidden:bool = False, Locked: bool = False):
 
     WordDoc = WordApp.Documents.Open(WordFile.__str__(), Visible=False)
     WordDoc = WordApp.ActiveDocument
     AiDoc = AiApp.Open(AiFile.as_posix())
     Table = WordDoc.Tables(1)
-    for i in range(2, Table.Rows.Count + 1):
-        yield f'Populating .ai File, segment {i} of {Table.Rows.Count}'
-        AiDoc.TextFrames(i - 1).Contents = Table.Cell(i, 2).Range.Text[:-1]
+    max = AiDoc.TextFrames.Count
+    i = 2
+    for index, frame in enumerate(AiDoc.TextFrames):
+        yield f'Populating .ai File, segment {index} of {max}'
+        if Hidden and frame.hidden:
+            continue
+        if Locked and frame.locked:
+            continue
+        frame.Contents = Table.Cell(i, 2).Range.Text[:-2]
+        i += 1
     WordDoc.Close()
     AiDoc.SaveAs(f'{AiFile.parent.as_posix()}/Merged_{AiFile.name}')
     AiDoc.ExportAsFormat(4, f'{AiFile.parent.as_posix()}/Merged_{AiFile.name}.pdf')  # noqa: E501
@@ -110,6 +132,25 @@ def replacetext(source: str):
     return source
 
 
+def Collapsible(layout, key, title='', arrows=(gui.SYMBOL_DOWN, gui.SYMBOL_UP),
+                collapsed=False):
+    return gui.Column([[gui.T((arrows[1] if collapsed else arrows[0]),
+                      enable_events=True, k=key+'-BUTTON-'), gui.T(title,
+                      enable_events=True, key=key+'-TITLE-')],
+                      [gui.pin(gui.Column(layout, key=key,
+                       visible=not collapsed, metadata=arrows))]], pad=(0, 0))
+
+
+Options = [
+    [gui.Checkbox(text='Skip Hidden', auto_size_text=True,
+     key='hidden', size=(22, 1), pad=(0, 0), metadata='option'),
+     gui.Checkbox(text='Skip Locked', auto_size_text=True,
+     key='locked', size=(22, 1), pad=(0, 0), metadata='option'),
+     gui.Checkbox(text='No PDF Export', auto_size_text=True,
+     key='noPDF', size=(22, 1), pad=(0, 0), metadata='option')]
+]
+
+
 layout = [
     [gui.Button(button_text='Extract', key='-Extract-'),
      gui.Button(button_text='Import', key='-Import-'),
@@ -126,6 +167,8 @@ layout = [
      gui.FilesBrowse(button_text='Browse', target='-DocPath-',
                      visible=False, key='-DocBrowse-',
                      file_types=(('Word files', '*.docx'),),)],
+    [Collapsible(layout=Options, key='Options',
+                 title='Options', collapsed=True)],
     [gui.Submit(button_text='Start', key='-Start-', visible=False)],
     [gui.ProgressBar(max_value=1, orientation='horizontal',
                      key='-PBar-', size=(50, 5), visible=False)],
@@ -140,6 +183,12 @@ while True:
     match event:
         case gui.WIN_CLOSED | 'Exit':
             break
+        case 'Options-BUTTON-':
+            window['Options'].update(visible=not window['Options'].visible)
+            window['Options'+'-BUTTON-'].\
+                update(window['Options'].metadata[0] if
+                       window['Options'].visible else
+                       window['Options'].metadata[1])
         case '-Extract-':
             SetFields('Extract')
             Task = 'Extract'
@@ -162,7 +211,10 @@ while True:
                     for Aifileindex, Aifile in enumerate(AiFileList):
                         Aifile = Path(Aifile)
                         window['-PFileName-'].update(value=Aifile.name)
-                        for step in ExtractText(AiApp, WordApp, Aifile):
+                        for step in ExtractText(
+                            AiApp, WordApp, Aifile,
+                            window['hidden'].get(), # type: ignore
+                            window['locked'].get()): # type: ignore
                             window['-PStep-'].update(value=step)
                             window['-PBar-'].update(
                                 current_count=(
@@ -180,15 +232,22 @@ while True:
                     AiApp.UserInteractionLevel = -1
                     for Aifileindex, AiFile in enumerate(AiFileList):
                         AiFile = Path(AiFile)
-                        window['-PFileName-'].update(value=Aifile.name)
+                        window['-PFileName-'].update(value=AiFile.name)
                         Found = False
                         for WordIndex, WordFile in enumerate(WordFileList):
                             if search(r'Strings_' + AiFile.name +
-                                      r'-\w{2}-\w{2}\.docx', WordFile):
+                                      r'(_NO_HIDDEN)*(_NO_LOCKED)*-\w{2}-\w{2}', WordFile):
                                 Found = True
+                                Hid = False
+                                lock = False
+                                if search('_NO_HIDDEN', WordFile):
+                                    Hid = True
+                                if search('_NO_LOCKED', WordFile):
+                                    lock = True
                                 WordFile = Path(WordFile)
                                 for step in ImportText(AiApp, AiFile,
-                                                       WordApp, WordFile):
+                                                       WordApp, WordFile,
+                                                       Hid, lock):
                                     window['-PStep-'].update(value=step)
                                     window['-PBar-'].update(
                                         current_count=(
