@@ -12,6 +12,51 @@ config = ConfigParser()
 config.read('config.ini')
 
 
+# Error Handling
+def FixAiFileList(AiFileList: list):
+    for index, AiFile in enumerate(AiFileList):
+        AiFile = Path(AiFile)
+        if AiFile.is_dir():
+            gui.popup_error(
+                f'"{AiFile.parent.as_posix()}" {config["errors"]["No_Dir"]}',
+                title='Folders are not supported')
+            AiFileList.pop(index)
+            continue
+        if not AiFile.is_file():
+            gui.popup_error(f'"{AiFile.name}" {config["errors"]["Not_file"]}',
+                title='File doesn\'t exist')
+            AiFileList.pop(index)
+            continue
+        if AiFile.suffix != '.ai':
+            gui.popup_error(f'"{AiFile.name}" {config["errors"]["Not_ai"]}',
+                title='File is not .ai')
+            AiFileList.pop(index)
+            continue
+    return AiFileList
+
+
+def FixWordFileList(WordFileList: list):
+    for index, WordFile in enumerate(WordFileList):
+        WordFile = Path(WordFile)
+        if WordFile.is_dir():
+            gui.popup_error(
+                f'"{WordFile.parent.as_posix()}" {config["errors"]["No_Dir"]}',
+                title='Folders are not supported')
+            WordFileList.pop(index)
+            continue
+        if not WordFile.is_file():
+            gui.popup_error(f'"{WordFile.name}" {config["errors"]["Not_file"]}',
+                title='File doesn\'t exist')
+            WordFileList.pop(index)
+            continue
+        if WordFile.suffix != '.docx':
+            gui.popup_error(f'"{WordFile.name}" {config["errors"]["Not_docx"]}',
+                title='File is not .docx')
+            WordFileList.pop(index)
+            continue
+    return WordFileList
+
+
 def SetFields(Option: str):
 
     window['-Start-'].update(visible=True)
@@ -227,6 +272,12 @@ while True:
             WordFileList = values['-DocPath-'].split(';')
             match Task: #type: ignore
                 case 'Extract':
+                    # Catch issues before looping
+                    AiFileList = FixAiFileList(AiFileList)
+                    if len(AiFileList) == 0:
+                        gui.popup_error(config['errors']['No_ai_left'],
+                                        title='No .ai file')
+                        continue
                     window['-PStep-'].update(
                         value='Opening Illustrator and Word')
                     # Start an instance of Illustrator and Word, same instance is reused for every file and closed when processing is done
@@ -234,12 +285,12 @@ while True:
                     WordApp = DispatchEx('Word.Application')
                     # Remove Illustrator user warnings for fonts and links missing and start looping over the files
                     AiApp.UserInteractionLevel = -1
-                    for Aifileindex, Aifile in enumerate(AiFileList):
-                        Aifile = Path(Aifile)
+                    for AiFileindex, AiFile in enumerate(AiFileList):
+                        AiFile = Path(AiFile)
                         # Display name of the file, and call Extract
-                        window['-PFileName-'].update(value=Aifile.name)
+                        window['-PFileName-'].update(value=AiFile.name)
                         for step in ExtractText(
-                            AiApp, WordApp, Aifile,
+                            AiApp, WordApp, AiFile,
                             window['hidden'].get(), # type: ignore
                             window['locked'].get(), # type: ignore
                             window['PDF'].get()): # type: ignore
@@ -247,14 +298,25 @@ while True:
                             window['-PStep-'].update(value=step)
                             window['-PBar-'].update(
                                 current_count=(
-                                    Aifileindex + 1)/len(AiFileList))
+                                    AiFileindex + 1)/len(AiFileList))
                     WordApp.Quit()
                     AiApp.Quit()
                 case 'Import':
                     # Check number of files in both lists, if different, warn the user with a popup
+                    # Catch issues before looping
+                    AiFileList = FixAiFileList(AiFileList)
+                    WordFileList = FixWordFileList(WordFileList)
+                    if len(AiFileList) == 0:
+                        gui.popup_error(config['errors']['No_ai_left'],
+                                        title='No .ai file')
+                        continue
+                    if len(WordFileList) == 0:
+                        gui.popup_error(config['errors']['No_docx_left'],
+                                        title='No .docx file')
+                        continue
                     if len(AiFileList) != len(WordFileList):
-                        gui.popup_error('''Number of files do not match!
-    Please note that there isn\'t the same amount of Word files and .ai files.''', auto_close_duration=4)  # noqa: E501
+                        gui.popup_error(config['errors']['Dif_Len'],
+                                        auto_close_duration=4, title='Different amount of files')
                     window['-PStep-'].update(
                         value='Opening Illustrator and Word')
                     # Start an instance of Illustrator and Word, same instance is reused for every file and closed when processing is done. Also initalize empty list for potential files that can't be matched.
@@ -264,7 +326,7 @@ while True:
                     # Remove Illustrator user warnings for fonts and links missing and start looping over the files
                     AiApp.UserInteractionLevel = -1
                     # Start looping over ai files
-                    for Aifileindex, AiFile in enumerate(AiFileList):
+                    for AiFileindex, AiFile in enumerate(AiFileList):
                         AiFile = Path(AiFile)
                         window['-PFileName-'].update(value=AiFile.name)
                         Found = False
@@ -297,24 +359,28 @@ while True:
                     if len(NoMatch) != 0:
                         gui.popup(f'The following files could not be matched and were skipped:\n{NoMatch}')
                 case 'Pseudo':
+                    AiFileList = FixAiFileList(AiFileList)
+                    if len(AiFileList) == 0:
+                        gui.popup_error(config['errors']['No_ai_left'])
+                        continue
                     window['-PStep-'].update(
                         value='Opening Illustrator ')
                     # Start an instance of Illustrator only, same instance is reused for every file and closed when processing is done
                     AiApp = DispatchEx('Illustrator.Application')
                     # Remove Illustrator user warnings for fonts and links missing and start looping over the files
                     AiApp.UserInteractionLevel = -1
-                    for Aifileindex, Aifile in enumerate(AiFileList):
-                        Aifile = Path(Aifile)
-                        window['-PFileName-'].update(value=Aifile.name)
+                    for AiFileindex, AiFile in enumerate(AiFileList):
+                        AiFile = Path(AiFile)
+                        window['-PFileName-'].update(value=AiFile.name)
                         for step in Pseudo(
-                                AiApp, Aifile,
+                                AiApp, AiFile,
                                 window['hidden'].get(), # type: ignore
                                 window['locked'].get(), # type: ignore
                                 window['PDF'].get()): # type: ignore
                             window['-PStep-'].update(value=step)
                             window['-PBar-'].update(
                                 current_count=(
-                                    Aifileindex + 1)/len(AiFileList))
+                                    AiFileindex + 1)/len(AiFileList))
                     AiApp.Quit()
             window['-PFileName-'].update(value='')
             window['-PStep-'].update(value='Done!')
