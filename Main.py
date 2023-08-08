@@ -140,7 +140,7 @@ def ExtractText(AiApp, WordApp, AiFile: Path,
 def ImportText(AiApp, AiFile: Path, WordApp, WordFile: Path,
                Hidden:bool, Locked: bool, PDF: bool):
 
-    WordDoc = WordApp.Documents.Open(WordFile.as_posix(), Visible=False)
+    WordDoc = WordApp.Documents.Open(WordFile.__str__(), Visible=False)
     WordDoc = WordApp.ActiveDocument
     AiDoc = AiApp.Open(AiFile.as_posix())
     Table = WordDoc.Tables(1)
