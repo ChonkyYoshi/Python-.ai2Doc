@@ -95,6 +95,10 @@ def ExtractText(AiApp, WordApp, AiFile: Path,
     AiDoc = AiApp.Open(AiFile.as_posix())
     WordFile = WordApp.Documents.Add()
     WordFile = WordApp.ActiveDocument
+    WordFile.Application.DisplayAlerts = 0
+    WordFile.ShowGrammaticalErrors = False
+    WordFile.ShowSpellingErrors = False
+    WordFile.SpellingChecked = True
     rng = WordFile.Range()
     table = WordFile.Tables.Add(rng, len(AiDoc.TextFrames)+1, 2)
     table.Cell(1, 1).Range.Text = 'Source'
@@ -115,7 +119,7 @@ def ExtractText(AiApp, WordApp, AiFile: Path,
         table.Cell(index + 2, 1).Range.Font.Hidden = True
         table.Cell(index + 2, 2).Range.Text = frame.Contents
     if PDF:
-        AiDoc.ExportAsFormat(4, f'{AiFile.parent.as_posix()}/Merged_{AiFile.name}.pdf')  # noqa: E501
+        AiDoc.ExportAsFormat(4, f'{AiFile.parent.as_posix()}/{AiFile.name}.pdf')  # noqa: E501
     AiDoc.Close()
     finalname = AiFile.name
     # Prepare final file name following option chosen
@@ -220,7 +224,7 @@ layout = [
      gui.Button(button_text='Import', key='-Import-'),
      gui.Button(button_text='Pseudo', key='-Pseudo-')],
     [gui.Text(text='Select \'Extract\' or \'Import\' to start.',
-              key='-Info-', size=(65, 11))],
+              key='-Info-', size=(65, 15))],
     [gui.InputText(default_text='Path to .ai files.', key='-AiPath-',
                    visible=False, ),
      gui.FilesBrowse(button_text='Browse', target='-AiPath-', key='-AiBrowse-',
