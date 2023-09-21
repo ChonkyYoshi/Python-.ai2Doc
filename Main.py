@@ -91,33 +91,46 @@ def ExtractText(AiApp, WordApp, AiFile: Path,
                 Hidden: bool, Locked: bool, PDF: bool):
 
     yield 'Opening .ai file'
-    # Create new blank word file in the background and add table the with Source, Target at top and as many rows under that as there are TextFrames  # noqa: E501
-    AiDoc = AiApp.Open(AiFile.as_posix())
-    WordFile = WordApp.Documents.Add()
-    WordFile = WordApp.ActiveDocument
-    WordFile.Application.DisplayAlerts = 0
-    WordFile.ShowGrammaticalErrors = False
-    WordFile.ShowSpellingErrors = False
-    WordFile.SpellingChecked = True
-    rng = WordFile.Range()
-    table = WordFile.Tables.Add(rng, len(AiDoc.TextFrames)+1, 2)
-    table.Cell(1, 1).Range.Text = 'Source'
-    table.Cell(1, 1).Range.font.Hidden = True
-    table.Cell(1, 2).Range.Text = 'Target'
-    table.Cell(1, 2).Range.font.Hidden = True
-    max = AiDoc.TextFrames.Count
-    count = 0
-    for index, frame in enumerate(AiDoc.TextFrames):
-        # For each TextFrame, if hidden or locked and option was ticked, go to next Textframe, leaving that row blank, else grab text and put it in the Word table. Row corresponds to index of the TextFrame. Yield current progress with every iterations for gui progress bar  # noqa: E501
-        yield f'Extracting text, Segment {index + 1} of {max}'
-        if frame.Hidden and Hidden:
-            continue
-        if frame.locked and Locked:
-            continue
-        count += 1
-        table.Cell(index + 2, 1).Range.Text = frame.Contents
-        table.Cell(index + 2, 1).Range.Font.Hidden = True
-        table.Cell(index + 2, 2).Range.Text = frame.Contents
+    # Create new blank word file in the background and add table the with Source, Target at top and as many rows under that as there are TextFrames  # noqa: 
+    AiApp.CoordinateSystem = 1
+    AiApp.Open(AiFile.as_posix())
+    AiDoc = AiApp.ActiveDocument
+    # WordFile = WordApp.Documents.Add()
+    # WordFile = WordApp.ActiveDocument
+    # WordFile.Application.DisplayAlerts = 0
+    # WordFile.ShowGrammaticalErrors = False
+    # WordFile.ShowSpellingErrors = False
+    # WordFile.SpellingChecked = True
+    # rng = WordFile.Range()
+    # table = WordFile.Tables.Add(rng, len(AiDoc.TextFrames)+1, 2)
+    # table.Cell(1, 1).Range.Text = 'Source'
+    # table.Cell(1, 1).Range.font.Hidden = True
+    # table.Cell(1, 2).Range.Text = 'Target'
+    # table.Cell(1, 2).Range.font.Hidden = True
+    # max = AiDoc.TextFrames.Count
+    test = list()
+    AiDoc.Artboards.SetActiveArtboardIndex(2)
+    AiDoc.SelectObjectsOnActiveArtboard()
+    for x in AiDoc.Selection:
+        for frame in x.TextFrames:
+            try:
+                frame.ConvertPointObjectToAreaObject()
+                test.append((frame.GeometricBounds[1], frame.Uuid, frame.Name))
+            except Exception:
+                test.append((frame.GeometricBounds[1], frame.Uuid, frame.Name))
+    test.sort(reverse=True)
+    for i in test:
+        for frame in AiDoc.TextFrames:
+            if frame.Uuid == i[1]:
+                for par in frame.Paragraphs:
+                    print(par.Contents, i[1])
+    print(test)
+    
+    # for frame in AiDoc.TextFrames:
+    #     if frame.locked:
+    #         for tr in frame.Paragraphs:
+    #             print(tr.Contents)
+
     if PDF:
         yield 'Exporting to PDF'
         AiDoc.ExportAsFormat(4, f'{AiFile.parent.as_posix()}/{AiFile.name}.pdf')
@@ -133,10 +146,26 @@ def ExtractText(AiApp, WordApp, AiFile: Path,
         for row in table.Rows:
             if row.Cells(1).Range.Text[:-2] == '':
                 row.Delete()
-    yield 'Saving Wor file'
+    yield 'Saving Word file'
     WordFile.SaveAs2(f'{AiFile.parent.as_posix()}/Strings_{finalname}.docx',
                      FileFormat=12)
     WordFile.Close()
+
+
+def GetStrings(TextFrames, table,
+               Hidden:bool,Locked:bool, max):
+    try:
+        for index, frame in TextFrames:
+            yield f'Extracting text, Segment {index + 1} of {max}'
+            if frame.Hidden and Hidden:
+                continue
+            if frame.locked and Locked:
+                continue
+            table.Cell(index + 2, 1).Range.Text = frame.Contents
+            table.Cell(index + 2, 1).Range.Font.Hidden = True
+            table.Cell(index + 2, 2).Range.Text = frame.Contents
+    except AttributeError:
+        return
 
 
 def ImportText(AiApp, AiFile: Path, WordApp, WordFile: Path,
@@ -292,7 +321,8 @@ while True:
                         value='Opening Illustrator and Word')
                     # Start an instance of Illustrator and Word, same instance is reused for every file and closed when processing is done  # noqa: E501
                     AiApp = DispatchEx('Illustrator.Application')
-                    WordApp = DispatchEx('Word.Application')
+                    # WordApp = DispatchEx('Word.Application')
+                    WordApp = 2
                     # Remove Illustrator user warnings for fonts and links missing and start looping over the files  # noqa: E501
                     AiApp.UserInteractionLevel = -1
                     for AiFileindex, AiFile in enumerate(AiFileList):
