@@ -1,9 +1,0 @@
-{
-  "[python]": {
-    "editor.defaultFormatter": null,
-    "editor.codeActionsOnSave": {
-      "source.fixAll": false
-    }
-  },
-  "python.analysis.typeCheckingMode": "basic"
-}
